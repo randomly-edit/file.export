@@ -49,7 +49,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function getInitialData() {
         const hashData = window.location.hash;
-        if (hashData && hashData.startsWith('#data=')) {
+        if (hashData && hashData.startsWith('?data=')) {
             try {
                 const encodedData = hashData.substring(6);
                 const decodedData = atob(encodedData);
