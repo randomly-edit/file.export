@@ -20,6 +20,7 @@ document.addEventListener('DOMContentLoaded', () => {
         rename: document.getElementById('rename-modal'),
         importLink: document.getElementById('import-link-modal'),
         shareLink: document.getElementById('share-link-modal'),
+        customDialog: document.getElementById('custom-dialog-modal'),
     };
     const editFileTextarea = document.getElementById('edit-file-textarea');
     const saveFileButton = document.getElementById('save-file-button');
@@ -30,12 +31,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const shareLinkInput = document.getElementById('share-link-input');
     const copyShareLinkButton = document.getElementById('copy-share-link-button');
     const moveToOptions = document.getElementById('move-to-options');
-
+    const customDialogTitle = document.getElementById('custom-dialog-title');
+    const customDialogMessage = document.getElementById('custom-dialog-message');
+    const customDialogCloseButton = document.getElementById('custom-dialog-close-button');
 
     // State Management
     let fsData = [];
     let selectedItems = new Set();
-    let contextMenuItem = null; // The item the context menu is open for
+    let contextMenuItem = null;
     let currentPath = [];
     let history = [[]];
     let historyIndex = 0;
@@ -55,6 +58,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 return migrateData(parsedData).data;
             } catch (e) {
                 console.error("Error parsing data from URL:", e);
+                showDialog('Import Error', 'Could not load data from the URL. It may be corrupted.');
             }
         }
 
@@ -65,10 +69,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 return migrateData(parsedData).data;
             } catch (e) {
                 console.error("Error parsing data from localStorage:", e);
+                showDialog('Load Error', 'Could not load your saved data. It may be corrupted.');
             }
         }
 
-        // Default data if nothing else is found
         return [
             { id: 1, type: 'folder', name: 'My Documents', children: [] },
             { id: 2, type: 'file', name: 'welcome.txt', content: btoa('Hello and welcome to your new file system!') },
@@ -76,10 +80,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function migrateData(data) {
-        // This is a placeholder for more complex migrations in the future.
         if (!data.version || data.version < DB_VERSION) {
-            // In a real scenario, you'd have specific migration paths, e.g., from v2 to v3.
-            // For now, we just update the version.
             data.version = DB_VERSION;
         }
         return data;
@@ -87,8 +88,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Data Persistence ---
     function saveData() {
-        const dataToSave = { version: DB_VERSION, data: fsData };
-        localStorage.setItem('fileSystem_test', JSON.stringify(dataToSave));
+        try {
+            const dataToSave = { version: DB_VERSION, data: fsData };
+            localStorage.setItem('fileSystem_test', JSON.stringify(dataToSave));
+        } catch (e) {
+            console.error("Error saving data:", e);
+            showDialog('Save Error', 'Could not save your changes. Your browser storage might be full.');
+        }
     }
 
     // --- Rendering ---
@@ -166,7 +172,6 @@ document.addEventListener('DOMContentLoaded', () => {
     backButton.addEventListener('click', () => {
         if (historyIndex > 0) {
             historyIndex--;
-            // We call the function directly without pushing to history again
             currentPath = history[historyIndex];
             selectedItems.clear();
             saveAndRender();
@@ -177,7 +182,6 @@ document.addEventListener('DOMContentLoaded', () => {
     forwardButton.addEventListener('click', () => {
         if (historyIndex < history.length - 1) {
             historyIndex++;
-            // We call the function directly without pushing to history again
             currentPath = history[historyIndex];
             selectedItems.clear();
             saveAndRender();
@@ -189,7 +193,6 @@ document.addEventListener('DOMContentLoaded', () => {
         backButton.disabled = historyIndex <= 0;
         forwardButton.disabled = historyIndex >= history.length - 1;
     }
-
 
     // --- Selection Mode ---
     function toggleSelectionMode() {
@@ -212,7 +215,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
             selectedItems.add(itemId);
         }
-        renderFileSystem(); // Re-render to show selection change
+        renderFileSystem();
     }
 
     // --- Context Menu ---
@@ -221,11 +224,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const actions = [];
 
         if (selectedItems.size > 1 && selectedItems.has(contextMenuItem.id)) {
-            // Multiple items selected
             actions.push({ label: `Zip (${selectedItems.size} items)`, action: 'zip' });
             actions.push({ label: `Delete (${selectedItems.size} items)`, action: 'delete-selected' });
         } else {
-            // Single item context menu
             actions.push({ label: 'Edit', action: 'edit' });
             actions.push({ label: 'Rename', action: 'rename' });
             actions.push({ label: 'Move To...', action: 'move-to' });
@@ -235,25 +236,16 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
-        actions.forEach(({ label, action }) => {
-            const li = document.createElement('li');
-            li.textContent = label;
-            li.dataset.action = action;
-            contextMenu.appendChild(li);
-        });
+        contextMenu.innerHTML = actions.map(a => `<li data-action="${a.action}">${a.label}</li>`).join('');
 
         contextMenu.style.display = 'block';
-        const menuWidth = contextMenu.offsetWidth;
-        const menuHeight = contextMenu.offsetHeight;
-        const bodyWidth = document.body.clientWidth;
-        const bodyHeight = document.body.clientHeight;
+        const menuWidth = contextMenu.offsetWidth, menuHeight = contextMenu.offsetHeight;
+        const bodyWidth = document.body.clientWidth, bodyHeight = document.body.clientHeight;
         contextMenu.style.left = x + menuWidth > bodyWidth ? `${x - menuWidth}px` : `${x}px`;
         contextMenu.style.top = y + menuHeight > bodyHeight ? `${y - menuHeight}px` : `${y}px`;
     }
 
-    function hideContextMenu() {
-        contextMenu.style.display = 'none';
-    }
+    function hideContextMenu() { contextMenu.style.display = 'none'; }
 
     contextMenu.addEventListener('click', e => {
         e.stopPropagation();
@@ -262,21 +254,13 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     async function handleContextMenuAction(action) {
-        if (!contextMenuItem && action !== 'zip' && action !== 'delete-selected') return;
-
+        if (!contextMenuItem && !['zip', 'delete-selected'].includes(action)) return;
         switch (action) {
-            case 'edit':
-                if (contextMenuItem.type === 'folder') navigateTo([...currentPath, contextMenuItem.id]);
-                else openEditFileModal(contextMenuItem);
-                break;
+            case 'edit': contextMenuItem.type === 'folder' ? navigateTo([...currentPath, contextMenuItem.id]) : openEditFileModal(contextMenuItem); break;
             case 'rename': openRenameModal(contextMenuItem); break;
             case 'move-to': openMoveToModal(contextMenuItem); break;
-            case 'delete':
-                deleteItems([contextMenuItem.id]);
-                break;
-            case 'delete-selected':
-                deleteItems([...selectedItems]);
-                break;
+            case 'delete': deleteItems([contextMenuItem.id]); break;
+            case 'delete-selected': deleteItems([...selectedItems]); break;
             case 'unzip': await unzipFile(contextMenuItem); break;
             case 'zip': await zipSelectedItems(); break;
         }
@@ -299,17 +283,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const zip = new JSZip();
         const itemsToZip = getFolderContents(currentPath).filter(i => selectedItems.has(i.id));
 
-        for (const item of itemsToZip) {
-            await addItemToZip(zip, item);
-        }
+        for (const item of itemsToZip) await addItemToZip(zip, item);
 
         const content = await zip.generateAsync({ type: 'base64' });
-        getFolderContents(currentPath).push({
-            id: Date.now(),
-            type: 'file',
-            name: 'archive.zip',
-            content: content
-        });
+        getFolderContents(currentPath).push({ id: Date.now(), type: 'file', name: 'archive.zip', content });
         selectedItems.clear();
         saveAndRender();
     }
@@ -320,27 +297,21 @@ document.addEventListener('DOMContentLoaded', () => {
             zip.file(item.name, decodedContent);
         } else if (item.type === 'folder') {
             const folderZip = zip.folder(item.name);
-            for (const child of item.children) {
-                await addItemToZip(folderZip, child);
-            }
+            for (const child of item.children) await addItemToZip(folderZip, child);
         }
     }
 
     async function unzipFile(file) {
-        if (!file.content) {
-            alert('File is empty and cannot be unzipped.');
-            return;
-        }
+        if (!file.content) return showDialog('Unzip Error', 'File is empty and cannot be unzipped.');
         try {
             const zip = await JSZip.loadAsync(file.content, { base64: true });
-            const newFolderName = file.name.endsWith('.zip') ? file.name.slice(0, -4) : `${file.name}-unzipped`;
+            const newFolderName = file.name.replace(/\.zip$/, '') || `${file.name}-unzipped`;
             const newFolder = { id: Date.now(), type: 'folder', name: newFolderName, children: [] };
 
             for (const filename in zip.files) {
                 const zipEntry = zip.files[filename];
                 if (!zipEntry.dir) {
                     const content = await zipEntry.async('base64');
-                    // This can be improved to handle folder structures within the zip
                     newFolder.children.push({ id: Date.now() + Math.random(), type: 'file', name: filename, content });
                 }
             }
@@ -348,16 +319,14 @@ document.addEventListener('DOMContentLoaded', () => {
             saveAndRender();
         } catch (e) {
             console.error("Unzip error:", e);
-            alert("Failed to unzip. File may be corrupt or not a valid zip.");
+            showDialog("Unzip Error", "Failed to unzip. File may be corrupt or not a valid zip.");
         }
     }
 
     function dataURLtoBlob(dataurl) {
         let arr = dataurl.split(','), mime = arr[0].match(/:(.*?);/)[1],
             bstr = atob(arr[1]), n = bstr.length, u8arr = new Uint8Array(n);
-        while (n--) {
-            u8arr[n] = bstr.charCodeAt(n);
-        }
+        while (n--) u8arr[n] = bstr.charCodeAt(n);
         return new Blob([u8arr], { type: mime });
     }
 
@@ -398,7 +367,7 @@ document.addEventListener('DOMContentLoaded', () => {
         input.click();
     });
     document.getElementById('export-selected').addEventListener('click', async () => {
-        if (selectedItems.size === 0) return alert('No items selected.');
+        if (selectedItems.size === 0) return showDialog('Export Error', 'No items selected.');
         const items = getFolderContents(currentPath).filter(i => selectedItems.has(i.id));
         if (items.length === 1 && items[0].type === 'file') {
             const item = items[0];
@@ -409,9 +378,7 @@ document.addEventListener('DOMContentLoaded', () => {
             link.click();
         } else {
             const zip = new JSZip();
-            for (const item of items) {
-                await addItemToZip(zip, item);
-            }
+            for (const item of items) await addItemToZip(zip, item);
             const content = await zip.generateAsync({ type: 'blob' });
             const link = document.createElement('a');
             link.href = URL.createObjectURL(content);
@@ -419,14 +386,13 @@ document.addEventListener('DOMContentLoaded', () => {
             link.click();
         }
     });
-    // ... (rest of the modal and helper functions: findItemAndParent, getFolderContents, etc.)
 
-    // --- Helper Functions (some might need slight adjustments) ---
+    // --- Helper Functions ---
     function getFolderContents(path) {
         let currentLevel = fsData;
         for (const folderId of path) {
             const folder = currentLevel.find(item => item.id === folderId && item.type === 'folder');
-            if (!folder) return []; // Path is invalid
+            if (!folder) return [];
             currentLevel = folder.children;
         }
         return currentLevel;
@@ -447,6 +413,13 @@ document.addEventListener('DOMContentLoaded', () => {
     function showModal(modal) { modal.classList.add('show'); }
     function hideModals() { document.querySelectorAll('.modal.show').forEach(m => m.classList.remove('show')); }
     closeButtons.forEach(btn => btn.addEventListener('click', hideModals));
+    customDialogCloseButton.addEventListener('click', hideModals);
+
+    function showDialog(title, message) {
+        customDialogTitle.textContent = title;
+        customDialogMessage.textContent = message;
+        showModal(modals.customDialog);
+    }
 
     function openEditFileModal(file) {
         const content = file.content ? atob(file.content) : '';
@@ -473,9 +446,6 @@ document.addEventListener('DOMContentLoaded', () => {
         };
         showModal(modals.rename);
     }
-
-    // ... (other functions like share, import link, check data, move to...)
-    // These functions should also be reviewed to ensure they work with the new data structure.
 
     // Final setup
     document.addEventListener('click', hideContextMenu);
